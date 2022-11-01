@@ -1,9 +1,9 @@
 (ns excel-templates.build
-  (:import [java.io File FileOutputStream FileInputStream]
+  (:import [java.io File FileOutputStream]
            [java.util Calendar]
            [java.util.zip ZipEntry ZipFile ZipOutputStream]
            [org.apache.poi.openxml4j.opc OPCPackage]
-           [org.apache.poi.ss.usermodel Cell Row DateUtil WorkbookFactory]
+           [org.apache.poi.ss.usermodel CellType DateUtil Row$MissingCellPolicy]
            [org.apache.poi.xssf.streaming SXSSFWorkbook]
            [org.apache.poi.xssf.usermodel XSSFWorkbook])
   (:require [clojure.java.io :as io]
@@ -47,7 +47,7 @@
 (defn formula?
   "Return true if src-cell has a formula"
   [cell]
-  (= (.getCellType cell) Cell/CELL_TYPE_FORMULA))
+  (= (.getCellType cell) CellType/FORMULA))
 
 (defn has-formula?
   "returns true if *any* of the cells on the sheet are calculated"
@@ -60,21 +60,21 @@
   ;; I don't know why case doesn't work here, but it wasn't matching
   (let [cell-type (.getCellType cell)]
    (cond
-     (= cell-type Cell/CELL_TYPE_STRING)
+     (= cell-type CellType/STRING)
      (-> cell .getRichStringCellValue .getString)
 
-     (= cell-type Cell/CELL_TYPE_NUMERIC)
+     (= cell-type CellType/NUMERIC)
      (if (DateUtil/isCellDateFormatted cell)
        (.getDateCellValue cell)
        (.getNumericCellValue cell))
 
-     (= cell-type Cell/CELL_TYPE_BOOLEAN)
+     (= cell-type CellType/BOOLEAN)
      (.getBooleanCellValue cell)
 
-     (= cell-type Cell/CELL_TYPE_FORMULA)
+     (= cell-type CellType/FORMULA)
      (.getCellFormula cell)
 
-     (= cell-type Cell/CELL_TYPE_BLANK)
+     (= cell-type CellType/BLANK)
      nil
 
      :else (do (println (str "returning nil because type is " (.getCellType cell))) nil))))
@@ -129,7 +129,7 @@
   (when src-row
     (let [ncols (inc (.getLastCellNum src-row))]
      (doseq [cell-num (range ncols)]
-       (when-let [src-cell (.getCell src-row cell-num Row/RETURN_BLANK_AS_NULL)]
+       (when-let [src-cell (.getCell src-row cell-num Row$MissingCellPolicy/RETURN_BLANK_AS_NULL)]
          (let [dst-cell (.createCell dst-row cell-num)
                val (get-val src-cell)]
            (if (formula? src-cell)
@@ -169,7 +169,7 @@ If there are any nil values in the source collection, the corresponding cells ar
         (let [dst-cell (or (.getCell dst-row cell-num)
                            (.createCell dst-row cell-num))]
           (.setCellStyle dst-cell
-                         (->> src-cell .getCellStyle .getIndex (.getCellStyleAt wb)))))))
+                         (->> src-cell .getCellStyle .getIndex .intValue (.getCellStyleAt wb)))))))  
   (.setHeight dst-row (.getHeight src-row)))
 
 (defn get-template
@@ -501,7 +501,7 @@ If there are any nil values in the source collection, the corresponding cells ar
       (build-base-output tmpcopy tmpfile)
       (let [replacements (replacements-by-sheet-name replacements)
             translation-table (fo/build-translation-tables replacements)
-            replacements (expand-replacements replacements)]
+            replacements (expand-replacements replacements)] 
         (with-open [pkg (OPCPackage/open tmpcopy)]
           (let [template (XSSFWorkbook. pkg)
                 intermediate-files (for [index (range (dec (.getNumberOfSheets template)))]
@@ -544,7 +544,7 @@ If there are any nil values in the source collection, the corresponding cells ar
                                     (let [new-row (.createRow sheet dst-row-num)]
                                       (copy-row translation-table wb sheet src-row new-row)
                                       (copy-styles wb src-row new-row)))
-                                  (recur (inc src-row-num) (inc dst-row-num)))))))
+                                  (recur (inc src-row-num) (inc dst-row-num))))))) 
                         (c/transform-charts sheet translation-table))
                       ;; Update cached results for each formula:
                       ;; https://poi.apache.org/spreadsheet/eval.html

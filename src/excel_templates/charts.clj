@@ -1,7 +1,7 @@
 (ns excel-templates.charts
   (:import [org.apache.commons.lang3 StringEscapeUtils]
            [org.apache.poi.xssf.usermodel XSSFChartSheet]
-           [org.openxmlformats.schemas.drawingml.x2006.chart CTChart$Factory])
+           [org.openxmlformats.schemas.drawingml.x2006.chart CTChart])
   (:require [clojure.data.zip :as zf]
             [clojure.data.zip.xml :as zx]
             [clojure.set :as set]
@@ -24,11 +24,10 @@
   [& methods]
   `(juxt ~@(map #(list 'memfn %) methods)))
 
-;;; TODO createDrawingPatriarch should be replaced by getDrawingPatriarch when that's available in POI 3.12
 (defn get-charts
   "Get the charts from a worksheet"
   [sheet]
-  (-> sheet .createDrawingPatriarch .getCharts))
+  (some-> sheet .getDrawingPatriarch .getCharts))
 
 (defn has-chart?
   "Return true if the sheet has any charts on it"
@@ -43,7 +42,7 @@
 (defn set-xml
   "Set new XML for the chart"
   [chart xml-str]
-  (let [new-chart (CTChart$Factory/parse xml-str)]
+  (let [new-chart (-> CTChart/Factory (.parse xml-str))]
     (-> chart .getCTChart (.set new-chart))))
 
 ;;; XML transformation for charts
@@ -128,7 +127,7 @@
   [sheet translation-table loc]
   (letfn [(editor [node]
             (assoc node
-              :content [(->> node :content first (transform-formula sheet translation-table))]))]
+                   :content [(->> node :content first (transform-formula sheet translation-table))]))]
     (tree-edit loc formula? editor)))
 
 (defn chart-transform
@@ -156,7 +155,7 @@
   [sheet old-index new-index loc]
   (letfn [(editor [node]
             (assoc node
-              :content [(->> node :content first (relocate-formula sheet old-index new-index))]))]
+                   :content [(->> node :content first (relocate-formula sheet old-index new-index))]))]
     (tree-edit loc formula? editor)))
 
 (defn expand-series
@@ -266,11 +265,13 @@
 (defn anchors-by-id
   "Gets a map of anchor objects by ID that show where the graphic with that ID is on the sheet"
   [sheet]
-  (let [anchors (-> sheet .createDrawingPatriarch .getCTDrawing .getTwoCellAnchorList)]
-    (into {} (for [anchor anchors]
-               [(-> anchor .getGraphicFrame .getGraphic .getGraphicData .getDomNode
-                    .getChildNodes (.item 0) (.getAttribute "r:id"))
-                anchor]))))
+  (if (has-chart? sheet)
+    (let [anchors (-> sheet .createDrawingPatriarch .getCTDrawing .getTwoCellAnchorList)]
+      (into {} (for [anchor anchors]
+                 [(-> anchor .getGraphicFrame .getGraphic .getGraphicData .getDomNode
+                      .getChildNodes (.item 0) (.getAttribute "r:id"))
+                  anchor])))
+    {}))
 
 (defn get-part-id
   "Get the part id for a document part in the drawing patriarch"
@@ -359,8 +360,8 @@
      (fn [id-set]
        {:edit
         (fn [xml-data]
-           (assoc xml-data :content (filter #(not (id-set (get-in % [:attrs :Id])))
-                                            (:content xml-data))))})
+          (assoc xml-data :content (filter #(not (id-set (get-in % [:attrs :Id])))
+                                           (:content xml-data))))})
      ids-by-rels)))
 
 (defn remove-anchors
@@ -373,18 +374,18 @@
      (fn [id-set]
        {:edit
         (fn [xml-data]
-           (loop [data xml-data]
-             (if-let [new-data (zx/xml1->
-                                (zip/xml-zip data)
-                                zf/descendants
-                                (zx/tag= :c:chart)
-                                #(boolean (id-set (zx/attr % :r:id)))
-                                zf/ancestors
-                                (zx/tag= :xdr:twoCellAnchor)
-                                zip/remove
-                                zip/root)]
-               (recur new-data)
-               data)))})
+          (loop [data xml-data]
+            (if-let [new-data (zx/xml1->
+                               (zip/xml-zip data)
+                               zf/descendants
+                               (zx/tag= :c:chart)
+                               #(boolean (id-set (zx/attr % :r:id)))
+                               zf/ancestors
+                               (zx/tag= :xdr:twoCellAnchor)
+                               zip/remove
+                               zip/root)]
+              (recur new-data)
+              data)))})
      ids-by-drawings)))
 
 (defn drawing-rel
